@@ -63,7 +63,7 @@ The mod itself needs nothing else. Node.js 22 or later is needed only for the sc
 | **Turn on Ultracode** / **Turn off Ultracode** | Runs `/effort ultracode on` or `off` for this session. |
 | **Got it** | Dismisses the tip. Tips of that kind then need a little more confidence before they show again. |
 
-After **Switch to xhigh**, the band confirms it and the effort menu moves with it. The desktop app calls xhigh **Extra**:
+The desktop app's effort menu calls xhigh **Extra**, so in the desktop app the tips do too: **Switch to Extra (xhigh)**. A terminal keeps plain xhigh. After the switch, the band confirms it and the effort menu moves with it (these screenshots were taken just before the tips used the desktop name):
 
 ![After pressing Switch, the band says "Switched to xhigh for this session. It applies from your next message (send "keep going" to use it now)." with an OK button, and the effort level under the prompt box now reads Extra.](docs/images/effort-tip-switched.png)
 

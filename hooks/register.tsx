@@ -20,7 +20,9 @@ import {
   emptyLearning,
   formatUltracodeMessage,
   formatUserMessage,
+  labelLevels,
   learnKey,
+  levelLabel,
   mergeConfig,
   midTaskRecommendation,
   newTurn,
@@ -155,9 +157,22 @@ async function showTip($: any, ctx: Context, event: Event, effort: any, rec: any
     }
     await update($, tipAtom, () => tip)
   }
-  const full = pieces(false)
+  // The band names levels per surface as it draws; the toast and the line beneath the
+  // answer use the session's surfaces ("Extra (xhigh)" in the desktop app).
+  const full = labelLevels(pieces(false), await sessionSurface($))
   if (ctx.config.display.toast && event !== 'stop') $.ui.toast(full, { timeoutMs: 8000 })
   return full
+}
+
+// "desktop" when the desktop app draws this session, else "terminal". The desktop app
+// attaches after session.start, so this is read when a tip is shown.
+async function sessionSurface($: any): Promise<string> {
+  try {
+    const surfaces = await $.session.surfaces()
+    return Array.isArray(surfaces) && surfaces.includes('desktop') ? 'desktop' : 'terminal'
+  } catch {
+    return 'terminal'
+  }
 }
 
 function rememberEffort(history: EffortAdvisorHistory, event: Event, decision: any): EffortAdvisorHistory {
@@ -364,8 +379,8 @@ async function drawBand($: any, e: any, next: any, ctx: Context) {
   const actionable = tip.status === 'shown' || tip.status === 'failed'
   return (
     <Box>
-      <Text dimColor>{tip.text} </Text>
-      {actionable && tip.effort ? <Button key="effort-advisor-switch" label={`Switch to ${tip.effort.to}`} onPress={() => pressSwitch($, ctx)} /> : null}
+      <Text dimColor>{labelLevels(tip.text, e.surface)} </Text>
+      {actionable && tip.effort ? <Button key="effort-advisor-switch" label={`Switch to ${levelLabel(tip.effort.to, e.surface)}`} onPress={() => pressSwitch($, ctx)} /> : null}
       {actionable && tip.ultracode ? <Button key="effort-advisor-ultracode" label={tip.ultracode.to === 'on' ? 'Turn on Ultracode' : 'Turn off Ultracode'} onPress={() => pressUltracode($, ctx)} /> : null}
       <Button key="effort-advisor-dismiss" label={tip.status === 'done' ? 'OK' : 'Got it'} onPress={() => pressDismiss($, ctx)} />
     </Box>

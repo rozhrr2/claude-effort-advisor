@@ -14,6 +14,8 @@ import {
   formatModelContext,
   formatUltracodeMessage,
   formatUserMessage,
+  labelLevels,
+  levelLabel,
   mergeConfig,
   recordOutcome,
   thresholdOffset,
@@ -241,6 +243,18 @@ test("turn end reads decisions, plans and recommendations, not only the offer se
   // At turn end, what was done ("all 212 tests pass") is not the work ahead.
   assert.equal(adviseUltracode({ kind: "turnEnd", answer: "All 34 repository files are migrated and the full suite is green.", ultracodeOn: false }).advice, "keep");
   assert.equal(adviseUltracode({ kind: "turnEnd", answer: "Here's the migration plan: 212 call sites across 9 packages, in 5 phases. Approve it and I'll start.", ultracodeOn: false }).advice, "on");
+});
+
+test("the desktop app's name for xhigh is Extra; other surfaces and levels keep theirs", () => {
+  assert.equal(levelLabel("xhigh", "desktop"), "Extra (xhigh)");
+  assert.equal(levelLabel("xhigh", "terminal"), "xhigh");
+  assert.equal(levelLabel("high", "desktop"), "high");
+  const tip = "Effort tip: xhigh suits this (tricky debugging); you're on high. Pick xhigh in the effort menu.";
+  const named = labelLevels(tip, "desktop");
+  assert.equal(named, "Effort tip: Extra (xhigh) suits this (tricky debugging); you're on high. Pick Extra (xhigh) in the effort menu.");
+  assert.equal(labelLevels(named, "desktop"), named, "safe to apply twice");
+  assert.equal(labelLevels(tip, "terminal"), tip);
+  assert.equal(labelLevels("You're on xhigh, which is slower.", "desktop"), "You're on Extra (xhigh), which is slower.");
 });
 
 test("an explicit 'Next steps' list predicts the next step from its first item", () => {

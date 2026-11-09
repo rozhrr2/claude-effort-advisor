@@ -13,6 +13,7 @@ import {
   formatModelContext,
   formatUltracodeMessage,
   formatUserMessage,
+  labelLevels,
   midTaskRecommendation,
   newTurn,
   offeredLevels,
@@ -182,7 +183,9 @@ export function handle(input, options = {}) {
   let output = null;
   if (decision.speak || ultracodeText) {
     const effortText = decision.speak ? formatUserMessage({ event: tipKind, from: decision.from, to: decision.to, rec, sustained: decision.sustained }) : "";
-    const userText = [effortText, ultracodeText].filter(Boolean).join(" ");
+    // The desktop app names xhigh "Extra" in its effort menu; Claude's own note keeps the codes.
+    const surface = env.CLAUDE_CODE_ENTRYPOINT === "claude-desktop" ? "desktop" : "terminal";
+    const userText = labelLevels([effortText, ultracodeText].filter(Boolean).join(" "), surface);
     const modelText = decision.speak
       ? formatModelContext({ event: tipKind, from: decision.from, to: decision.to, rec })
       : `[Effort advisor — suggestion only] ${ultracodeText} Mention it once, in one short line, then continue.`;

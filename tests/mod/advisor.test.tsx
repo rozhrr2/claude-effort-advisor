@@ -78,13 +78,22 @@ test('a debugging prompt at high shows an xhigh tip with a Switch button', async
   expect(world.toasts.length).toBe(1)
   expect(world.toasts[0]).toMatch(/^Effort tip: xhigh suits this \(tricky debugging\); you're on high\./)
   expect(world.toasts[0]).toMatch(/effort menu next to the model picker/)
-  for (const surface of ['terminal', 'desktop'] as const) {
+  // The desktop app's effort menu calls xhigh "Extra", so the band there does too.
+  for (const [surface, name] of [['terminal', /xhigh/], ['desktop', /Extra \(xhigh\)/]] as const) {
     const ui = await $.ui.mount({ ...BAND, surface })
-    expect((await ui.find({ type: 'Text', text: /Effort tip: xhigh/ }))?.text).toMatch(/you're on high/)
-    expect(await ui.find({ type: 'Button', text: /Switch to xhigh/ })).toBeDefined()
+    expect((await ui.find({ type: 'Text', text: /Effort tip: / }))?.text).toMatch(new RegExp(`^Effort tip: ${name.source} suits this \\(tricky debugging\\); you're on high`))
+    expect((await ui.find({ type: 'Button', text: /Switch to / }))?.text).toMatch(new RegExp(`Switch to ${name.source}$`))
     expect(await ui.find({ type: 'Button', text: /Got it/ })).toBeDefined()
     await ui.unmount()
   }
+})
+
+test('in the desktop app the toast calls xhigh Extra (xhigh) too', async ($, on) => {
+  const world = engine(on)
+  on('session.surfaces', () => ({ value: ['desktop'] }))
+  await $.turn.start({ text: 'debug why the tests are flaky on Windows only', turnId: 't1' })
+  await step($, 't1', 'high')
+  expect(world.toasts[0]).toMatch(/^Effort tip: Extra \(xhigh\) suits this \(tricky debugging\); you're on high\. To use it for this task, pick Extra \(xhigh\) in the effort menu/)
 })
 
 test('pressing Switch runs /effort for the session and confirms it', async ($, on) => {
@@ -94,7 +103,7 @@ test('pressing Switch runs /effort for the session and confirms it', async ($, o
   const ui = await band($)
   await ui.press({ key: 'effort-advisor-switch' })
   expect(world.commands).toContain('/effort xhigh')
-  expect((await ui.find({ type: 'Text', text: /Switched to xhigh/ }))?.text).toMatch(/for this session/)
+  expect((await ui.find({ type: 'Text', text: /Switched to Extra \(xhigh\)/ }))?.text).toMatch(/for this session/)
   expect(await ui.find({ type: 'Button', text: /Switch to/ })).toBeUndefined()
   expect(await ui.find({ type: 'Button', text: /OK/ })).toBeDefined()
   await ui.unmount()
@@ -228,7 +237,7 @@ test('settings rows can turn off the toast and the turn-end tip', { options: { s
   await step($, 't1', 'high')
   expect(world.toasts).toEqual([])
   const ui = await band($)
-  expect(await ui.find({ type: 'Text', text: /Effort tip: xhigh/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Effort tip: Extra \(xhigh\)/ })).toBeDefined()
   await ui.press({ key: 'effort-advisor-dismiss' })
   await ui.unmount()
   await $.turn.complete(complete('t1', 'The plan is ready. Want me to implement it?'))

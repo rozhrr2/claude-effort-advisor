@@ -51,6 +51,17 @@ function transcript(directory, effort, model = "claude-opus-5-5") {
   return path;
 }
 
+test("UserPromptSubmit: the desktop app's note calls xhigh Extra (xhigh); Claude's note keeps the code", (t) => {
+  const state = tempDir(t, "desktop");
+  const input = { hook_event_name: "UserPromptSubmit", session_id: "s30", prompt: "debug why the tests are flaky on Windows only" };
+  const desktop = run({ ...input, transcript_path: transcript(state, "high") }, claudeEnv(state, { CLAUDE_CODE_ENTRYPOINT: "claude-desktop" }), { channel: "both" });
+  assert.match(desktop.systemMessage, /Extra \(xhigh\) suits this/);
+  assert.match(desktop.systemMessage, /pick Extra \(xhigh\) in the effort menu/);
+  assert.doesNotMatch(desktop.hookSpecificOutput.additionalContext, /Extra/);
+  const terminal = run({ ...input, session_id: "s31", transcript_path: transcript(state, "high") }, claudeEnv(state, { CLAUDE_CODE_ENTRYPOINT: "cli" }));
+  assert.match(terminal.systemMessage, /^Effort tip: xhigh suits this/);
+});
+
 test("UserPromptSubmit: no tip for a level the model's menu lacks", (t) => {
   const state = tempDir(t, "model");
   const env = claudeEnv(state);
@@ -193,6 +204,8 @@ test("entry script: fail-open on bad input, valid JSON on a tip, fast enough", (
   const state = tempDir(t, "entry");
   const env = { ...process.env, EFFORT_ADVISOR_STATE_DIR: state, CLAUDECODE: "1" };
   delete env.CLAUDE_EFFORT;
+  // A terminal session, whoever runs the tests (the desktop app names xhigh "Extra").
+  delete env.CLAUDE_CODE_ENTRYPOINT;
   const transcriptPath = transcript(state, "high");
   for (const stdin of ["", "not json", "{\"hook_event_name\":"]) {
     const result = spawnSync(process.execPath, [ENTRY], { input: stdin, env, encoding: "utf8" });

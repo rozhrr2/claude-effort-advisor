@@ -1,0 +1,6 @@
+{
+  "name": "claude-effort-advisor",
+  "description": "Effort Advisor: suggests which reasoning effort to use in Claude Code, before, during and after each task.",
+  "owner": { "name": "Rozh" },
+  "plugins": [{ "name": "effort-advisor", "source": "./" }]
+}

@@ -1,0 +1,42 @@
+{
+  "name": "effort-advisor",
+  "version": "0.1.0",
+  "description": "Suggests a reasoning effort level before, during and after each task; shows tips without changing settings.",
+  "author": { "name": "Rozh" },
+  "license": "MIT",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "min_confidence": {
+      "type": "number",
+      "title": "Minimum confidence",
+      "description": "How sure the advisor must be before it shows a tip (0.3 to 0.95). Higher means fewer tips.",
+      "default": 0.6,
+      "min": 0.3,
+      "max": 0.95
+    },
+    "show_toast": {
+      "type": "boolean",
+      "title": "Show toasts",
+      "description": "Also show each tip briefly as a toast. The band above the prompt shows it either way.",
+      "default": true
+    },
+    "mid_task_tips": {
+      "type": "boolean",
+      "title": "Mid-task tips",
+      "description": "Suggest a different level when a task turns into debugging or into routine edits.",
+      "default": true
+    },
+    "turn_end_tips": {
+      "type": "boolean",
+      "title": "Turn-end tips",
+      "description": "At the end of a turn, suggest a level for the likely next step.",
+      "default": true
+    },
+    "ultracode_hints": {
+      "type": "boolean",
+      "title": "Ultracode hints",
+      "description": "For whole-codebase audits, also mention Ultracode (multi-agent, uses much more). Turn off if your Claude Code has no Ultracode.",
+      "default": true
+    }
+  }
+}

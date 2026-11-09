@@ -1,0 +1,3 @@
+tests/node/.fixtures/
+.claude-plugin/types/
+.claude/

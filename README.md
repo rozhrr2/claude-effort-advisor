@@ -3,13 +3,11 @@
 **It tells you when to switch Claude's reasoning effort**, from low to max, and whether Ultracode is worth it, before, during and after a task. One click on **Switch** changes the level for this session, exactly as if you typed `/effort <level>`. It never switches on its own.
 
 - In the desktop app, the tip appears as a band above the prompt box, with the buttons.
-- You can still switch by hand: the effort menu next to the model picker, or `/effort <level>` in a terminal.
+- You can still switch by hand: the effort menu next to the model picker (where xhigh is called **Extra**), or `/effort <level>` in a terminal.
 
 *An independent community project. It is not made, endorsed or supported by Anthropic.*
 
-![The advisor's tip in the Claude Code desktop app. A band above the prompt box says: "Effort tip: the work is now straightforward edits, so high is enough (you're on xhigh)", with a Got it button. Numbered callouts mark the band, the effort level next to the model, and the prompt box.](docs/images/effort-tip-in-desktop-app.png)
-
-*The screenshot shows version 0.1. Version 0.2 adds a **Switch to high** button next to **Got it**.*
+![The advisor in the Claude Code desktop app. A band above the prompt box says "Effort tip: xhigh suits this (tricky debugging); you're on high." with Switch to xhigh and Got it buttons. The same tip shows as a toast at the top right, and the effort level under the prompt box reads High.](docs/images/effort-tip-in-desktop-app.png)
 
 ## In 30 seconds
 
@@ -65,6 +63,10 @@ The mod itself needs nothing else. Node.js 22 or later is needed only for the sc
 | **Turn on Ultracode** / **Turn off Ultracode** | Runs `/effort ultracode on` or `off` for this session. |
 | **Got it** | Dismisses the tip. Tips of that kind then need a little more confidence before they show again. |
 
+After **Switch to xhigh**, the band confirms it and the effort menu moves with it. The desktop app calls xhigh **Extra**:
+
+![After pressing Switch, the band says "Switched to xhigh for this session. It applies from your next message (send "keep going" to use it now)." with an OK button, and the effort level under the prompt box now reads Extra.](docs/images/effort-tip-switched.png)
+
 The commands appear in the transcript like ones you typed. Nothing is written to your settings files, and a new session starts at your usual level.
 
 ## Try it without installing
@@ -98,7 +100,7 @@ These are real outputs of the advisor and its tests.
 
 | You're on | What happens | What it shows |
 | --- | --- | --- |
-| high | You: *debug why the tests are flaky on Windows only* | 💡 **xhigh** suits this (tricky debugging) |
+| high | You: *debug why the tests are flaky on Windows only* | 💡 **xhigh** suits this (tricky debugging), as in the screenshot above |
 | high | You: *design the architecture for the sync service and write a spec with trade-offs* | 💡 **max** suits this (a design or architecture decision) |
 | max | You: *add a --dry-run flag to the install script and write tests for it* | 💡 **high** is enough (everyday build or fix work) |
 | max | You: *add a loading spinner to the submit button on the login form* | 🤫 nothing: one small request is over before a switch pays off |
@@ -108,7 +110,7 @@ These are real outputs of the advisor and its tests.
 | high | You: *nope, same thing*, after two of Claude's fixes did not hold | 💡 **xhigh** suits this (tricky debugging) |
 | max | You: *go with redis*, after Claude laid out three options | 💡 **high** is enough (you picked an option: building it) |
 | high | Mid-task: three test runs fail in one turn | 💡 **xhigh** may help (tricky debugging) |
-| xhigh | Mid-task: eight plain edits in a row | 💡 **high** is enough (straightforward edits), as in the screenshot above |
+| xhigh | Mid-task: eight plain edits in a row | 💡 **high** is enough (straightforward edits) |
 | max | Claude ends with *The plan is ready. Want me to implement it?* | 💡 next step: **high** should be enough |
 | high | Claude ends with *There are three ways out: a queue, async sends, or batching. Which do you prefer?* | 💡 next step (a design decision): **max** may help |
 | high | Claude ends with *I could not reproduce the crash; the root cause is still unknown.* | 💡 next step: **xhigh** may help |
@@ -120,6 +122,8 @@ And for Ultracode:
 | off | You: *audit the entire codebase for unsafe sql queries* | 💡 a broad sweep with many independent parts, which Ultracode handles well [**Turn on Ultracode**] |
 | on | You: *rename the helper to formatDate* | 💡 Ultracode is on, but this is a small edit [**Turn off Ultracode**] |
 | off | Claude ends with *Here's the migration plan: 212 call sites across 9 packages, in 5 phases.* | 💡 a next step with many independent parts [**Turn on Ultracode**] |
+
+![An Ultracode tip above the prompt box: "Ultracode tip: Ultracode is on, but this is a small next step; it runs multi-agent workflows on every task and uses much more." with Turn off Ultracode and Got it buttons. The status line under the prompt box reads Opus 5.5, Max, Ultracode.](docs/images/ultracode-tip.png)
 
 ## Where tips appear
 

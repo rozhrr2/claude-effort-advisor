@@ -1,8 +1,10 @@
 {
   "name": "effort-advisor",
-  "version": "0.1.0",
-  "description": "Suggests a reasoning effort level before, during and after each task; shows tips without changing settings.",
-  "author": { "name": "Rozh" },
+  "version": "0.2.0",
+  "description": "Suggests a reasoning effort level and whether to use Ultracode, before, during and after each task; one click switches for you.",
+  "author": {
+    "name": "Rozh"
+  },
   "license": "MIT",
   "types": "./types/index.d.ts",
   "userConfig": {
@@ -35,7 +37,13 @@
     "ultracode_hints": {
       "type": "boolean",
       "title": "Ultracode hints",
-      "description": "For whole-codebase audits, also mention Ultracode (multi-agent, uses much more). Turn off if your Claude Code has no Ultracode.",
+      "description": "Suggest turning Ultracode on for broad sweeps, and off for small tasks while it is on.",
+      "default": true
+    },
+    "learn_from_choices": {
+      "type": "boolean",
+      "title": "Learn from my choices",
+      "description": "Adjust how readily each kind of tip appears, from which tips you follow or dismiss. Counts only, no text; /effort-advisor reset clears it.",
       "default": true
     }
   }

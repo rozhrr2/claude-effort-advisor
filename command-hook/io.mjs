@@ -144,6 +144,28 @@ function lastAssistantRow(path, wanted) {
   return null;
 }
 
+/** The last few user and assistant messages, in memory only, for follow-up context. */
+export function recentHistoryFromTranscript(path, limit = 8, maxChars = 4000) {
+  if (!path || typeof path !== "string") return [];
+  const history = [];
+  for (const line of readTail(path).split("\n")) {
+    if (!line.includes("\"user\"") && !line.includes("\"assistant\"")) continue;
+    try {
+      const entry = JSON.parse(line);
+      if (entry?.type !== "user" && entry?.type !== "assistant") continue;
+      const content = entry.message?.content;
+      const text = typeof content === "string"
+        ? content
+        : Array.isArray(content) ? content.filter((block) => block?.type === "text").map((block) => block.text).join("\n") : "";
+      if (!text.trim() || /^<(?:command-|local-command)/.test(text.trim())) continue;
+      history.push({ role: entry.type, text: text.slice(0, maxChars) });
+    } catch {
+      // A partial first line or a non-JSON line is skipped.
+    }
+  }
+  return history.slice(-limit);
+}
+
 export function lastEffortInTranscript(path) {
   return normalizeLevel(lastAssistantRow(path, "\"effort\"")?.effort);
 }

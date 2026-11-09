@@ -3,21 +3,43 @@ import test from "node:test";
 
 import {
   DEFAULT_CONFIG,
+  adviseUltracode,
   analyzeBatch,
   classifyNextStep,
   classifyPrompt,
   decide,
+  decideUltracode,
+  describeLearning,
+  emptyLearning,
   formatModelContext,
+  formatUltracodeMessage,
   formatUserMessage,
   mergeConfig,
+  recordOutcome,
+  thresholdOffset,
   midTaskRecommendation,
   newTurn,
   normalizeLevel,
   offeredLevels,
   updateTurn,
+  windowEntry,
 } from "../../lib/core.mjs";
 
 const config = mergeConfig(DEFAULT_CONFIG, {});
+
+// Replays a session the way the mod does: each prompt sees the messages and window before it.
+function replaySession(messages, prompt) {
+  let window = [];
+  messages.forEach((message, index) => {
+    if (message.role !== "user") return;
+    const rec = classifyPrompt(message.text, { history: messages.slice(0, index), window });
+    const entry = windowEntry(rec, message.text);
+    if (entry) window = [...window, entry];
+  });
+  const rec = classifyPrompt(prompt, { history: messages, window });
+  const entry = windowEntry(rec, prompt);
+  return { rec, window: entry ? [...window, entry] : window };
+}
 
 test("classifier maps task shapes to the agreed levels", () => {
   const cases = [
@@ -102,11 +124,161 @@ test("mid-task rules spot a debugging spiral and a run of mechanical edits", () 
   assert.equal(midTaskRecommendation(turn, "high", config).level, "xhigh");
   assert.equal(midTaskRecommendation(turn, "xhigh", config).level, null, "already high enough");
 
+  const everyday = classifyPrompt("add a csv export to the reports page and write tests for it");
   let edits = newTurn("e");
   for (let i = 0; i < 6; i += 1) edits = updateTurn(edits, { calls: 1, edits: 1, failures: 0 });
-  assert.equal(midTaskRecommendation(edits, "max", config).level, "high");
-  assert.equal(midTaskRecommendation(edits, "xhigh", config).level, null, "xhigh needs 8 edits");
-  assert.equal(midTaskRecommendation(updateTurn(edits, { calls: 1, edits: 0, failures: 1 }), "max", config).level, null, "a failure resets the streak");
+  assert.equal(midTaskRecommendation(edits, "max", config, { turnRec: everyday }).level, "high");
+  assert.equal(midTaskRecommendation(edits, "xhigh", config, { turnRec: everyday }).level, null, "xhigh needs 8 edits");
+  const oneStray = updateTurn(edits, { calls: 1, edits: 0, failures: 1 });
+  assert.equal(midTaskRecommendation(oneStray, "max", config, { turnRec: everyday }).level, "high", "one stray failure keeps the streak");
+  assert.equal(midTaskRecommendation(updateTurn(oneStray, { calls: 1, edits: 0, failures: 1 }), "max", config, { turnRec: everyday }).level, null, "a second failure resets it");
+  assert.equal(midTaskRecommendation(edits, "max", config).level, null, "an unknown task needs a longer run");
+});
+
+test("edits inside a hard task never trigger the 'high is enough' tip", () => {
+  const hard = classifyPrompt("redesign the sync architecture and migrate the storage layer, weigh the trade-offs");
+  let edits = newTurn("h");
+  for (let i = 0; i < 20; i += 1) edits = updateTurn(edits, { calls: 1, edits: 1, failures: 0 });
+  assert.equal(midTaskRecommendation(edits, "max", config, { turnRec: hard }).skip, "edits_inside_hard_task");
+});
+
+test("follow-ups are judged by what they continue, not on their own", () => {
+  const offer = [
+    { role: "user", text: "the login test fails on CI but passes locally" },
+    { role: "assistant", text: "I reproduced it; it looks like a timing issue. Want me to dig into the root cause?" },
+  ];
+  const accepted = classifyPrompt("yes go ahead", { history: offer });
+  assert.equal(accepted.level, "xhigh");
+  assert.equal(accepted.followUp, "accept");
+  assert.ok(accepted.confidence >= 0.6);
+
+  const retry = classifyPrompt("nope, still failing", { history: [{ role: "user", text: "fix the flaky upload test" }, { role: "assistant", text: "I changed the retry logic." }] });
+  assert.equal(retry.level, "xhigh");
+  assert.equal(retry.followUp, "retry");
+
+  const implement = classifyPrompt("yes", { history: [{ role: "user", text: "design the sync service architecture" }, { role: "assistant", text: "Here is the spec with trade-offs. Want me to implement it?" }] });
+  assert.equal(implement.level, "high");
+
+  assert.equal(classifyPrompt("yes go ahead").level, null, "with no history it stays silent");
+  const marker = "zebra-quartz-7731";
+  assert.ok(!JSON.stringify(classifyPrompt("yes", { history: [{ role: "user", text: `debug why ${marker} is flaky` }] })).includes(marker), "no text leaks into the result");
+});
+
+test("a run of small requests suggests going lower; one small request does not", () => {
+  const messages = [
+    { role: "user", text: "change the primary button color to the brand blue" },
+    { role: "assistant", text: "Done." },
+    { role: "user", text: "make the header sticky" },
+    { role: "assistant", text: "Done, position: sticky with top 0." },
+    { role: "user", text: "bump the footer link font size a bit" },
+    { role: "assistant", text: "Changed from 12px to 14px." },
+  ];
+  const { rec, window } = replaySession(messages, "now round the corners on the cards");
+  assert.equal(rec.category, "light_run");
+  const decision = decide({ event: "prompt", current: "xhigh", rec, state: { window }, config });
+  assert.equal(decision.speak, true);
+  assert.equal(decision.to, "medium");
+  assert.equal(decision.sustained, true);
+  // A run is only ever a reason to go lower.
+  assert.equal(decide({ event: "prompt", current: "low", rec, state: { window }, config }).speak, false);
+  // Short prompts with no signal extend a run, but two known light ones are needed.
+  assert.equal(windowEntry(classifyPrompt("hmm"), "hmm"), "unknown");
+  assert.equal(classifyPrompt("ok and the footer", { window: ["unknown", "unknown"] }).category === "light_run", false);
+  // One small request at a high level is not a pattern.
+  assert.equal(decide({ event: "prompt", current: "xhigh", rec: classifyPrompt("round the corners on the cards"), state: { window: ["medium"] }, config }).speak, false);
+});
+
+test("a bug still failing after Claude's fixes is tricky debugging, whatever the wording", () => {
+  const saga = [
+    { role: "user", text: "memory on the ingest workers climbs ~200mb/hr until they get oomkilled" },
+    { role: "assistant", text: "Heap snapshot points at the parser cache. I bounded it with an LRU." },
+    { role: "user", text: "still climbing, slower though" },
+    { role: "assistant", text: "The remaining growth is outside the JS heap. I switched the gzip stream to be closed explicitly." },
+  ];
+  const rec = classifyPrompt("didnt help. try again, and this time figure out what's holding the native memory", { history: saga });
+  assert.equal(rec.level, "xhigh");
+  assert.equal(rec.saga, 2);
+  assert.ok(rec.confidence >= 0.85);
+  // Once it works, the saga is over.
+  const solved = [...saga, { role: "user", text: "works now, thanks" }, { role: "assistant", text: "Great." }];
+  assert.notEqual(classifyPrompt("quick q, where is the config file?", { history: solved }).category, "debug");
+  // One failed fix of an ordinary error is still everyday fixing.
+  const once = [
+    { role: "user", text: "build fails: Module not found: can't resolve '@/lib/env'" },
+    { role: "assistant", text: "Added the @ path alias to tsconfig.json." },
+  ];
+  assert.notEqual(classifyPrompt("same error", { history: once }).level, "xhigh");
+});
+
+test("broad sweeps get Ultracode; their effort stays high unless the sweep is about security", () => {
+  const sweep = classifyPrompt("review the entire codebase for dead code, unused exports and stale feature flags");
+  assert.equal(sweep.level, "high");
+  assert.equal(adviseUltracode({ kind: "prompt", prompt: "review the entire codebase for dead code, unused exports and stale feature flags", ultracodeOn: false, rec: sweep }).advice, "on");
+  const security = classifyPrompt("audit every endpoint in the api for missing auth checks");
+  assert.equal(security.level, "xhigh");
+  // One coherent change is never many independent parts.
+  assert.equal(adviseUltracode({ kind: "prompt", prompt: "find all bugs in this function: ```js\nconst a = 1\n```", ultracodeOn: false, rec: classifyPrompt("find all bugs in this function") }).advice, "keep");
+  // "just that one for now" narrows a broad task.
+  const audit = [
+    { role: "user", text: "audit the whole codebase for unsafe deserialization" },
+    { role: "assistant", text: "Audit complete: 14 findings, 2 critical. Want me to fix the pickle.loads one?" },
+  ];
+  const narrowed = classifyPrompt("yeah just that one for now", { history: audit });
+  assert.equal(adviseUltracode({ kind: "prompt", prompt: "yeah just that one for now", history: audit, ultracodeOn: true, rec: narrowed }).advice, "off");
+  // An acknowledgement is no task at all.
+  assert.equal(adviseUltracode({ kind: "prompt", prompt: "perfect thanks", ultracodeOn: true, rec: classifyPrompt("perfect thanks") }).advice, "keep");
+});
+
+test("turn end reads decisions, plans and recommendations, not only the offer sentence", () => {
+  const choice = classifyNextStep("Profiling shows the fan-out blocks each request. There are three ways out: a queue, async sends, or batching. Which do you prefer?");
+  assert.equal(choice.level, "max");
+  const plan = classifyNextStep("Got it, the queue approach. Implementation plan: add a producer, a worker with backoff and a dead-letter topic.");
+  assert.equal(plan.level, "high");
+  const recommended = classifyNextStep("Compared three hosts. Recommendation: stay on S3 plus CDN and add preview deploys.");
+  assert.equal(recommended.level, "high");
+  // A passing mention of flaky tests is not an open problem.
+  assert.notEqual(classifyNextStep("Done. Note the existing tests rely on real timers and two of them were already flaky.").category, "debug");
+  // At turn end, what was done ("all 212 tests pass") is not the work ahead.
+  assert.equal(adviseUltracode({ kind: "turnEnd", answer: "All 34 repository files are migrated and the full suite is green.", ultracodeOn: false }).advice, "keep");
+  assert.equal(adviseUltracode({ kind: "turnEnd", answer: "Here's the migration plan: 212 call sites across 9 packages, in 5 phases. Approve it and I'll start.", ultracodeOn: false }).advice, "on");
+});
+
+test("an explicit 'Next steps' list predicts the next step from its first item", () => {
+  const rec = classifyNextStep("Done with the parser.\n\nNext steps:\n1. Write the architecture spec for the plugin system\n2. Update the docs");
+  assert.equal(rec.level, "max");
+  assert.equal(classifyNextStep("All tests pass and the branch is merged.").skip, "done");
+});
+
+test("Ultracode: on for broad sweeps, off for small work while on, keep otherwise", () => {
+  const audit = "audit the entire codebase for unsafe sql queries";
+  assert.equal(adviseUltracode({ prompt: audit, ultracodeOn: false, rec: classifyPrompt(audit) }).advice, "on");
+  assert.equal(adviseUltracode({ prompt: audit, ultracodeOn: true, rec: classifyPrompt(audit) }).advice, "keep", "already on");
+  const rename = "rename the helper to formatDate";
+  assert.equal(adviseUltracode({ prompt: rename, ultracodeOn: true, rec: classifyPrompt(rename) }).advice, "off");
+  assert.equal(adviseUltracode({ prompt: rename, ultracodeOn: false, rec: classifyPrompt(rename) }).advice, "keep");
+  assert.equal(adviseUltracode({ prompt: "ultracode: audit everything", ultracodeOn: false, rec: null }).advice, "keep", "the keyword is the user's own choice");
+  const design = "design the architecture for multi-region failover";
+  assert.equal(adviseUltracode({ prompt: design, ultracodeOn: true, rec: classifyPrompt(design) }).advice, "keep", "hard work keeps it");
+  const advice = adviseUltracode({ prompt: audit, ultracodeOn: false, rec: classifyPrompt(audit) });
+  assert.equal(decideUltracode({ advice, state: {}, config }).speak, true);
+  assert.equal(decideUltracode({ advice, state: { promptCount: 2, lastUltracode: { to: "on", promptCount: 1 } }, config }).why, "cooldown");
+  assert.match(formatUltracodeMessage({ to: "on", advice }), /\/effort ultracode on/);
+  assert.doesNotMatch(formatUltracodeMessage({ to: "on", advice, buttons: true }), /\/effort/);
+});
+
+test("learning: followed tips lower the bar, dismissed ones raise it, counts only", () => {
+  let learning = emptyLearning();
+  const key = "prompt:debug:up";
+  for (let i = 0; i < 5; i += 1) learning = recordOutcome(learning, key, "dismissed");
+  assert.equal(thresholdOffset(learning, key), 0.2);
+  const debug = classifyPrompt("why does the hook crash when the transcript is empty?");
+  assert.equal(decide({ event: "prompt", current: "high", rec: debug, config, learning }).why, "learned_quiet");
+  for (let i = 0; i < 8; i += 1) learning = recordOutcome(learning, key, "accepted");
+  assert.ok(thresholdOffset(learning, key) < 0);
+  assert.equal(decide({ event: "prompt", current: "high", rec: debug, config, learning }).speak, true);
+  assert.equal(decide({ event: "prompt", current: "high", rec: debug, config: { ...config, learning: false }, learning: recordOutcome(emptyLearning(), key, "dismissed") }).speak, true, "learning off ignores counts");
+  assert.match(describeLearning(learning), /prompt · debug · up/);
+  assert.deepEqual(Object.keys(learning.keys[key]).sort(), ["accepted", "dismissed", "ignored", "manual"]);
 });
 
 test("policy raises when confident and needs a real gap to lower", () => {
@@ -120,9 +292,12 @@ test("policy raises when confident and needs a real gap to lower", () => {
   assert.equal(fromMax.speak, true);
   assert.equal(fromMax.to, "high");
 
+  // max is a fair choice for a review; one step down from it is no tip.
   const review = classifyPrompt("review this PR before I merge it");
-  assert.equal(decide({ event: "prompt", current: "max", rec: review, config }).to, "xhigh", "max → xhigh is the one single-step drop");
-  assert.equal(decide({ event: "prompt", current: "max", rec: { ...review, confidence: 0.7 }, config }).why, "small_downshift");
+  assert.equal(decide({ event: "prompt", current: "max", rec: review, config }).why, "max_fits_hard_work");
+  // One small request at max stays quiet; two actions are worth the tip.
+  const spinner = classifyPrompt("add a loading spinner to the submit button on the login form");
+  assert.equal(decide({ event: "prompt", current: "max", rec: spinner, config }).why, "one_off_down");
 });
 
 test("quick answers lower effort only after a sustained run", () => {
@@ -176,8 +351,8 @@ test("messages are short, name the effort menu and how to apply mid-turn", () =>
   assert.match(formatUserMessage({ event: "stop", from: "max", to: "high", rec: { label: "implementation" } }), /^Effort tip for the next step \(implementation\): high should be enough/);
   assert.match(formatUserMessage({ event: "midTask", from: "max", to: "high", rec: { label: "straightforward edits" } }), /the work is now straightforward edits, so high is enough/);
   const audit = classifyPrompt("audit the entire codebase for security issues");
-  assert.match(formatUserMessage({ event: "prompt", from: "high", to: "xhigh", rec: audit }), /Ultracode/);
-  assert.doesNotMatch(formatUserMessage({ event: "prompt", from: "high", to: "xhigh", rec: audit, ultracode: false }), /Ultracode/);
+  assert.doesNotMatch(formatUserMessage({ event: "prompt", from: "high", to: "xhigh", rec: audit }), /Ultracode/, "Ultracode advice is its own message now");
+  assert.doesNotMatch(formatUserMessage({ event: "prompt", from: "high", to: "xhigh", rec, buttons: true }), /effort menu/, "a band with a Switch button needs no how-to");
   const context = formatModelContext({ event: "prompt", from: "high", to: "xhigh", rec });
   assert.match(context, /suggestion only/);
   assert.match(context, /do not change any settings/);

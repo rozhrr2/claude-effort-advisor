@@ -4,21 +4,26 @@
 import { dirname } from "node:path";
 
 import {
+  adviseUltracode,
   analyzeBatch,
   classifyNextStep,
   classifyPrompt,
   decide,
+  decideUltracode,
   formatModelContext,
+  formatUltracodeMessage,
   formatUserMessage,
   midTaskRecommendation,
   newTurn,
   offeredLevels,
   updateTurn,
+  windowEntry,
 } from "../lib/core.mjs";
 import {
   currentEffort,
   lastModelInTranscript,
   logDecision,
+  recentHistoryFromTranscript,
   pruneStates,
   readState,
   stateRoot,
@@ -65,11 +70,14 @@ function toolCallsFrom(input) {
   return [];
 }
 
-// Only fixed labels and signal tags are kept between events, never text.
+// Only fixed labels, signal tags and yes/no flags are kept between events, never text.
+const KEPT_FLAGS = ["shortTask", "explicit", "ultracodeHint", "substantial", "longWork", "multiStep", "weak", "riskyChange", "allowSingleStep", "inherited", "downOnly", "afterDesign"];
+
 function labelsOf(rec) {
   if (!rec?.level) return null;
-  const { level, confidence, category, label, reasons, shortTask, explicit, ultracodeHint } = rec;
-  return { level, confidence, category, label, reasons, shortTask, explicit, ultracodeHint };
+  const { level, confidence, category, label, reasons } = rec;
+  const flags = Object.fromEntries(KEPT_FLAGS.filter((name) => rec[name] === true).map((name) => [name, true]));
+  return { level, confidence, category, label, reasons, ...flags };
 }
 
 function buildOutput({ hookEventName, kind, channel, userText, modelText }) {
@@ -114,6 +122,7 @@ export function handle(input, options = {}) {
   let rec = null;
   let tipKind = kind;
   let decision = null;
+  let ultracodeAdvice = null;
   if (kind === "prompt") {
     state = { ...state, promptCount: state.promptCount + 1 };
     const resolved = resolvePending(state, current.trusted ? current.level : null, true);
@@ -126,10 +135,16 @@ export function handle(input, options = {}) {
     } catch {
       taskMode = null;
     }
-    rec = classifyPrompt(prompt, { routerMode: taskMode });
+    // The conversation so far, read in memory from the transcript, so follow-ups are judged in context.
+    const history = recentHistoryFromTranscript(input.transcript_path, config.contextMessages)
+      .filter((message, index, all) => !(index === all.length - 1 && message.role === "user" && message.text.trim() === prompt.trim()));
+    rec = classifyPrompt(prompt, { routerMode: taskMode, history, window: state.window ?? [] });
+    ultracodeAdvice = config.ultracodeHints ? adviseUltracode({ kind: "prompt", prompt, history, ultracodeOn: false, rec }) : null;
     if (!config.ultracodeHints) rec = { ...rec, ultracodeHint: false };
     state.turn = { ...newTurn(input.prompt_id ?? `p${state.promptCount}`), promptRec: labelsOf(rec), promptDecided: current.trusted };
-    if (rec.level) state.window = [...(state.window ?? []), rec.level].slice(-WINDOW_SIZE);
+    // A level, or "unknown" for a short prompt with no signal: never the text.
+    const entry = windowEntry(rec, prompt);
+    if (entry) state.window = [...(state.window ?? []), entry].slice(-WINDOW_SIZE);
     decision = current.trusted ? null : { speak: false, why: "deferred_until_effort_known" };
   } else {
     const resolved = resolvePending(state, current.level, false);
@@ -149,9 +164,9 @@ export function handle(input, options = {}) {
           decision = promptDecision;
         }
       }
-      if (!decision) rec = current.level ? midTaskRecommendation(state.turn, current.level, config) : null;
+      if (!decision) rec = current.level ? midTaskRecommendation(state.turn, current.level, config, { turnRec: state.turn.promptRec }) : null;
     } else if (input.stop_hook_active !== true) {
-      rec = classifyNextStep(typeof input.last_assistant_message === "string" ? input.last_assistant_message : "", state.turn);
+      rec = classifyNextStep(typeof input.last_assistant_message === "string" ? input.last_assistant_message : "", state.turn, { turnRec: state.turn.promptRec });
     }
   }
 
@@ -161,16 +176,23 @@ export function handle(input, options = {}) {
     const model = typeof input.model === "string" ? input.model : lastModelInTranscript(input.transcript_path);
     if (!offeredLevels(model).includes(decision.to)) decision = { speak: false, why: "level_not_offered" };
   }
+  // A hook can't see whether Ultracode is on, so it only ever suggests turning it on.
+  const ultracodeDecision = ultracodeAdvice?.advice === "on" ? decideUltracode({ advice: ultracodeAdvice, state, config }) : null;
+  const ultracodeText = ultracodeDecision?.speak ? formatUltracodeMessage({ to: "on", advice: ultracodeAdvice, buttons: false }) : "";
   let output = null;
-  if (decision.speak) {
-    const userText = formatUserMessage({ event: tipKind, from: decision.from, to: decision.to, rec, sustained: decision.sustained, ultracode: config.ultracodeHints });
-    const modelText = formatModelContext({ event: tipKind, from: decision.from, to: decision.to, rec });
+  if (decision.speak || ultracodeText) {
+    const effortText = decision.speak ? formatUserMessage({ event: tipKind, from: decision.from, to: decision.to, rec, sustained: decision.sustained }) : "";
+    const userText = [effortText, ultracodeText].filter(Boolean).join(" ");
+    const modelText = decision.speak
+      ? formatModelContext({ event: tipKind, from: decision.from, to: decision.to, rec })
+      : `[Effort advisor — suggestion only] ${ultracodeText} Mention it once, in one short line, then continue.`;
     output = buildOutput({ hookEventName: input.hook_event_name, kind, channel: config.channel, userText, modelText });
-    if (output) {
+    if (output && decision.speak) {
       state.lastSuggestion = { from: decision.from, to: decision.to, promptCount: state.promptCount, event: tipKind };
       state.pending = { to: decision.to, direction: decision.direction, promptCount: state.promptCount };
       state.turn = { ...state.turn, suggestedTo: decision.to };
     }
+    if (output && ultracodeText) state.lastUltracode = { to: "on", promptCount: state.promptCount };
   }
   if (current.level && current.trusted) state.lastEffort = current.level;
   writeState(path, state);

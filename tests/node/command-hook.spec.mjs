@@ -116,12 +116,50 @@ test("PostToolBatch: a failing run suggests xhigh once per turn; edits at max su
   assert.match(second.systemMessage, /then send "keep going"/);
   assert.equal(run(failing("c"), env), null, "not repeated in the same turn");
 
+  // The turn's task is everyday work (too vague for a tip at prompt time), so a run of
+  // plain edits at max can drop to high.
+  assert.equal(run({ hook_event_name: "UserPromptSubmit", session_id: "s6", prompt_id: "p1", transcript_path: transcript(state, "max"), prompt: "install the tool and configure it" }, env), null);
   const edits = { hook_event_name: "PostToolBatch", session_id: "s6", prompt_id: "p1", effort: { level: "max" } };
   let output = null;
   for (let i = 0; i < 3; i += 1) {
     output = run({ ...edits, tool_calls: [{ tool_name: "Edit", tool_response: "ok" }, { tool_name: "Edit", tool_response: "ok" }] }, env);
   }
   assert.match(output.systemMessage, /the work is now straightforward edits, so high is enough \(you're on max\)/);
+
+  // When the prompt already got "high is enough", the same tip is not repeated mid-turn.
+  assert.match(run({ hook_event_name: "UserPromptSubmit", session_id: "s6c", prompt_id: "p1", transcript_path: transcript(state, "max"), prompt: "add a csv export to the reports page and write tests for it" }, env).systemMessage, /high is enough/);
+  let repeat = null;
+  for (let i = 0; i < 3; i += 1) repeat = run({ ...edits, session_id: "s6c", tool_calls: [{ tool_name: "Edit", tool_response: "ok" }, { tool_name: "Edit", tool_response: "ok" }] }, env) ?? repeat;
+  assert.equal(repeat, null);
+
+  // Inside a hard task the same edits stay quiet.
+  run({ hook_event_name: "UserPromptSubmit", session_id: "s6b", prompt_id: "p1", transcript_path: transcript(state, "max"), prompt: "redesign the storage architecture and weigh the trade-offs of each option" }, env);
+  let quiet = null;
+  for (let i = 0; i < 6; i += 1) {
+    quiet = run({ hook_event_name: "PostToolBatch", session_id: "s6b", prompt_id: "p1", effort: { level: "max" }, tool_calls: [{ tool_name: "Edit", tool_response: "ok" }, { tool_name: "Edit", tool_response: "ok" }] }, env) ?? quiet;
+  }
+  assert.equal(quiet === null || !/straightforward edits/.test(quiet.systemMessage ?? ""), true);
+});
+
+test("UserPromptSubmit: a short follow-up is judged by the conversation in the transcript", (t) => {
+  const state = tempDir(t, "follow");
+  const env = claudeEnv(state);
+  const path = join(state, "transcript.jsonl");
+  writeFileSync(path, [
+    JSON.stringify({ type: "user", message: { content: "the login test fails on CI but passes locally" } }),
+    JSON.stringify({ type: "assistant", effort: "high", message: { model: "claude-opus-5-5", content: [{ type: "text", text: "I reproduced it; it looks like a timing issue. Want me to dig into the root cause?" }] } }),
+    "",
+  ].join("\n"));
+  const output = run({ hook_event_name: "UserPromptSubmit", session_id: "s15", transcript_path: path, prompt: "yes go ahead" }, env);
+  assert.match(output.systemMessage, /^Effort tip: xhigh suits this \(you accepted: tricky debugging\); you're on high\./);
+  assert.ok(!allStateText(state).replace(readFileSync(path, "utf8"), "").includes("timing issue"), "no conversation text in the advisor's state");
+});
+
+test("UserPromptSubmit: a whole-codebase audit also gets the Ultracode tip", (t) => {
+  const state = tempDir(t, "ultracode");
+  const env = claudeEnv(state);
+  const output = run({ hook_event_name: "UserPromptSubmit", session_id: "s16", transcript_path: transcript(state, "xhigh"), prompt: "audit the entire codebase for unsafe sql queries" }, env);
+  assert.match(output.systemMessage, /Ultracode tip: .*\/effort ultracode on/);
 });
 
 test("Stop: a turn-end tip is a systemMessage only and never continues the turn", (t) => {
